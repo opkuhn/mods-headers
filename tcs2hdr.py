@@ -29,6 +29,7 @@ After inspection of the ISIS logs, it appears that:
 
 import numpy as np
 from astropy.io import fits
+from astropy.time import Time
 import argparse
 import os
 import subprocess
@@ -38,6 +39,19 @@ from datetime import datetime,timedelta
 
 
 
+def find_dups(outfile):
+   hdrcom = ['COMMENT', 'HISTORY', 'END']
+   with open(outfile,"r") as f:
+         kwd = []
+         duplist = []
+         for line in f:
+            newkey = line.split(" ")[0].strip("'=','\n'")
+            if newkey in kwd and newkey not in hdrcom:
+               duplist.append(newkey)
+               print("duplist: %s" % ( newkey))
+            kwd.append(newkey)
+   print (duplist)
+   return duplist
 
 def is_duplicate(line):
   # duplicates are signaled by no comment after the "/" and not in simplekeys
@@ -69,6 +83,7 @@ def int_or_float(num):
 def tcsstatus(inImage,isislog,L):
    G = open(isislog,"r")
    isis = G.readlines()
+   ti = -1
 
    # find the line reporting that the input image was written
    # the missing TCS information can be found in the preceding TCSTATUS line, which should have a timestamp 
@@ -78,14 +93,29 @@ def tcsstatus(inImage,isislog,L):
    if len(fl) == 1: 
         fi = int(fl[0])
         print(fi, isis[fi])
+        L.write("%d %s\n" % (fi,isis[fi]))
         tall = [i for i in range(len(isis)) if "M2.TC>M2.RC DONE: TCSTATUS" in isis[i]]
         iall = [i for i in range(len(isis)) if "M2.IE>M2.RC DONE: ISTATUS" in isis[i]]
         eall = [i for i in range(len(isis)) if "IE Timeout with ERROR" in isis[i]]
+
+        print (tall)
+        # if there is no tcstatus line that corresponds to the start of exposure
+        # in this case, len(fl) ==1 but ti = -1
         if len(tall) > 0:
-           ti = max(filter(lambda nnn: nnn<fi, tall))
+           ti = max(filter(lambda nnn: nnn<fi, tall),default=0)
            if ti > 0:
                print(ti, isis[ti])
                L.write("%d %s\n" % (ti,isis[ti]))
+           else:
+               print(isis[fi].strip(" ")[0])
+               utend = isis[fi].split(" ")[0]
+               ti = -1 * Time(utend,format='isot',scale='utc').mjd
+               L.write("no TCSTATUS: %s \n" % (isis[fi]))
+        else: 
+           print(isis[fi].strip(" ")[0])
+           utend = isis[fi].split(" ")[0]
+           ti = -1 * Time(utend,format='isot',scale='utc').mjd
+           L.write("no TCSTATUS: %s \n" % (isis[fi]))
         if len(iall) > 0:
            ii = max(filter(lambda nnn: nnn<fi, iall))
            print(ii, isis[ii])
@@ -99,8 +129,10 @@ def tcsstatus(inImage,isislog,L):
         L.write("Error: len(fl)=",len(fl),"****\n",fl)
 
    G.close()
-   if len(fl) == 1: 
+   if len(fl) == 1 and ti>0: 
         return isis[ti]
+   elif len(fl) == 1 and ti<=0: 
+        return ti
    elif len(fl) != 1: 
         return len(fl)
 
@@ -123,6 +155,7 @@ def readhead(inImage):
    
 # the MODS header keywords that have a value but do not have a comment 
 simplekeys = ['SIMPLE', 'BITPIX',  'NAXIS', 'NAXIS1',  'NAXIS2', 'BZERO', 'OVERSCNX', 'OVERSCNY', 'CCDROI']
+hdrcom = ['COMMENT', 'HISTORY', 'END']
 
 isisdir = "../ISIS/"
 note = "***"
@@ -187,26 +220,32 @@ for e in range(nimgs):
         ntries = ntries+1
    if ntries == 2:
         print ("Error: Reached max number of tries")
+   if is_number(tisis) and tisis < 0:
+        print ("No TCS status line from which to draw missing TCS keyword values.")
 
    #convert tisis into a list of arrays 
    L.write(("Using values from %s\n" % (isislog)))
 
    # use shlex to split on spaces _except_ when these are enclosed by quotes
-   ilist = (shlex.split(tisis.strip()))
-   ia=[]
-   for i in range(len(ilist)):
-        ik = ilist[i].split("=")[0].strip()
-        if len(ilist[i].split("="))>1:
-           #iv = (ilist[i].split("=")[1].strip())
-           # remove added quotes around objname and guiname
-           iv = ilist[i].split("=")[1].strip("'")
-        else: 
-           iv = 0
-        ia.append(np.array([ik,iv]))
+   if not is_number(tisis): 
+        ilist = (shlex.split(tisis.strip()))
+        ia=[]
+        for i in range(len(ilist)):
+           ik = ilist[i].split("=")[0].strip()
+           if len(ilist[i].split("="))>1:
+              #iv = (ilist[i].split("=")[1].strip())
+              # remove added quotes around objname and guiname
+              iv = ilist[i].split("=")[1].strip("'")
+           else: 
+              iv = 0
+           ia.append(np.array([ik,iv]))
 
    ###### Read the header into a text file ######
 
    outfile = readhead(inImage)
+
+   # find the duplicate keywords
+   duplist = find_dups(outfile)
 
    # read the header text file line by line
    # pick out the MISSING and DUPLICATE entries 
@@ -220,8 +259,15 @@ for e in range(nimgs):
    dv=[]
    m=[]
    d=[]
+   duplist=[]
    recnum = 0
    idup = 0
+  
+
+   duplist = find_dups(outfile)
+
+   isodate = '0'
+
    with open(outfile,"r") as f:
          for line in f:
             # is there an equal sign in the keyword/value part?
@@ -236,6 +282,10 @@ for e in range(nimgs):
                wv.append(np.array(["LDGROT","VALUE"]))
             if "END" in line:
                wv.append(np.array(["END","VALUE"]))
+            if "ISODATE" in line:
+               iso = shlex.split(l[1].split("/")[0])
+               isodate = iso[0]
+               wv.append(np.array([l[0].strip(),isodate]))
             # missing telescope info --- no "=" and not a comment or end
             if "=" not in line.split("/")[0] and "COMMENT" not in line and "END" not in line:
                #kwd = line.split("/")[0].strip()
@@ -267,6 +317,7 @@ for e in range(nimgs):
 
    L.write("\n\nDuplicate keywords start...\n")
    for i in range(len(dv)):
+            L.write("%s %s\n" % (dv[i][0],dv[i][1]))
             for j in range(len(wv)):
                if dv[i][0].strip() == wv[j][0].strip():
                     if dv[i][1] != wv[j][1]:
@@ -293,30 +344,60 @@ for e in range(nimgs):
 # search for each one in the isis tcsstatus string immediately prior to the writing of the file (ti)
 # result is the set: keyword, (missing)value, comment
 
+
    for i in range(len(m)):
-       mk = m[i].split("/")[0].strip()
-       mc = m[i].split("/")[1].strip()
-       missing = mc + note
-       del hdr[mk]
-       mk_in_isis = 0
-       for j in range(len(ia)):
-            if mk == ia[j][0]:
-               mk_in_isis = 1
-               if is_number(ia[j][1]):
-                   mval = int_or_float(ia[j][1])
+        mk = m[i].split("/")[0].strip()
+        mc = m[i].split("/")[1].strip()
+        missing = mc + note
+        del hdr[mk]
+        mk_in_isis = 0
+        if is_number(tisis) and tisis < 0:
+            mval = " " # by default, empty
+            #add the bare minimum, date-obs, mjd-obs, equinox (=2000) and radecsys = ("FK5")
+            # date-obs from isodate or, failing that, the file-write time
+            if str.lower(mk[len(mk)-3:len(mk)]) == "obs":
+               if len(isodate)>1:
+                  if str.lower(mk) == "date-obs":
+                      mval = isodate
+                  if str.lower(mk) == "mjd-obs":
+                      mval = Time(isodate,format='isot',scale='utc').mjd
                else:
-                   mval = ia[j][1]
-               print("***",mk,mval,missing)
-               L.write("Adding %s %s %s \n" % (mk,str(mval),missing))
-               hdr[mk] = (mval,missing)
-       if not mk_in_isis:
-            print ("###",mk," is not in the ISIS TCSTATUS")
-            L.write("### %s is not in the ISIS TCSTATUS\n" % (mk))
+                  # get date from file write time
+                  missing = "***  time is when the file was written"
+                  ut = Time((tisis*-1),format='mjd',scale='utc').isot
+                  if str.lower(mk) == "date-obs":
+                      mval = ut 
+                  if str.lower(mk) == "mjd-obs":
+                      mval = -1*tisis
+            if str.lower(mk) == "equinox":
+               mval = 2000
+            if str.lower(mk) == "radecsys":
+               mval = "FK5"
+            print("***",mk,mval,missing)
+            L.write("Adding %s %s %s \n" % (mk,str(mval),missing))
+            hdr[mk] = (mval,missing)
+        if not is_number(tisis):
+            for j in range(len(ia)):
+               if mk == ia[j][0]:
+                  mk_in_isis = 1
+                  if is_number(ia[j][1]):
+                      mval = int_or_float(ia[j][1])
+                  else:
+                      mval = ia[j][1]
+                  print("***",mk,mval,missing)
+                  L.write("Adding %s %s %s \n" % (mk,str(mval),missing))
+                  hdr[mk] = (mval,missing)
+            if not mk_in_isis:
+                  print ("###",mk," is not in the ISIS TCSTATUS")
+                  L.write("### %s is not in the ISIS TCSTATUS\n" % (mk))
 
 
    hdr['HISTORY'] = "*** indicates TCS keywords missing from original header."
    hdr['HISTORY'] = "These header cards were added with a script that looked up"
-   hdr['HISTORY'] = "their values in MODS ISIS logs."
+   hdr['HISTORY'] = "their values in the TCSTATUS line that was written into the"
+   hdr['HISTORY'] = "MODS ISIS log at a time corresponding to the exposure start."
+   hdr['HISTORY'] = "If there is no such TCSTATUS line in the log, most values are"
+   hdr['HISTORY'] = "left empty, and times are when the file was written."
    print ("Updating the file")
    hdul.flush()
  
