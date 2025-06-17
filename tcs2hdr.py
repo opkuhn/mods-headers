@@ -244,8 +244,6 @@ for e in range(nimgs):
 
    outfile = readhead(inImage)
 
-   # find the duplicate keywords
-   duplist = find_dups(outfile)
 
    # read the header text file line by line
    # pick out the MISSING and DUPLICATE entries 
@@ -264,6 +262,7 @@ for e in range(nimgs):
    idup = 0
   
 
+   # find the duplicate keywords
    duplist = find_dups(outfile)
 
    isodate = '0'
