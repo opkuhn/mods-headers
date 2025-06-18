@@ -69,7 +69,7 @@ for i in keyls:
       del h[i]
       fitskey = keywd[i][0]
       val = h[fitskey]
-      print("Deleted the first occurrence of %s, at card \#%d. Now %s has correct value %s" % (keywd[i][0],i,keywd[i][0],val))
+      print("Deleted the first occurrence of %s, at card %#%d. Now %s has correct value %s" % (keywd[i][0],i,keywd[i][0],val))
       print("Deleting the second occurrence of %s" % (keywd[i][0]))
       del h[keywd[i][0]]
       print("Inserting the keyword/value/comment %s/%s/%s at position %d" % (keywd[i][0],val,keywd[i][1],i))
