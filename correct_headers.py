@@ -1,4 +1,5 @@
-#!/lbt/mods_runtime/anaconda/bin/python
+#!/usr/bin/env python
+# /lbt/mods_runtime/anaconda/bin/python
 # /opt/anaconda/bin/python
 
 ###############################################################################
@@ -27,6 +28,8 @@ parser = argparse.ArgumentParser(description = 'fix headers')
 parser.add_argument('filename', type=str, help = 'file which needs fixing')
 args = parser.parse_args()
 filename= args.filename
+
+# indices and keywords copied from output of fitsverify, but see below - astropy headers are 0-indexed. 
 
 keyls = {120, 103, 109, 95, 100, 93, 99, 98, 94, 118, 106, 107, 87, 92, 85, 91, 90, 86, 25, 115, 108, 102, 113, 114, 111, 110, 105, 104, 119} 
 
@@ -65,15 +68,15 @@ h = f[0].header
 
 for i in keyls:
 
-      # delete all of the duplicate keywords
-      del h[i]
+      # delete all of the duplicate keywords, python uses 0-indexed
+      del h[i-1]
       fitskey = keywd[i][0]
       val = h[fitskey]
-      print("Deleted the first occurrence of %s, at card %#%d. Now %s has correct value %s" % (keywd[i][0],i,keywd[i][0],val))
-      print("Deleting the second occurrence of %s" % (keywd[i][0]))
+      print("Deleted the first occurence of %s, at card %d. Now %s has correct value %s" % (keywd[i][0],i-1,keywd[i][0],val))
+      print("Deleting the second occurence of %s" % (keywd[i][0]))
       del h[keywd[i][0]]
-      print("Inserting the keyword/value/comment %s/%s/%s at position %d" % (keywd[i][0],val,keywd[i][1],i))
-      h.insert(i,(keywd[i][0],val,keywd[i][1]))
+      print("Inserting the keyword/value/comment %s/%s/%s at position %d" % (keywd[i][0],val,keywd[i][1],i-1))
+      h.insert(i-1,(keywd[i][0],val,keywd[i][1]))
 
 # write this back to the original file  
 print("Updating the file.")
