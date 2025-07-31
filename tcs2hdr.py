@@ -5,7 +5,10 @@
 tcs2hdr.py -
 
 2025-Jun-13 1st version, opk/lbto
-
+2025-Jun-17   - make a list of duplicates, use it to identify duplicates since when TCS info is missing, there may be added entries that
+                 are not duplicates but also do not have a comment.
+                - generalize to both blue and red channels (just MODS2 so far)
+                     
 This script fills in the values of missing TCS keywords, using the TCSTATUS information from the ISIS log. 
 
 Headers of some MODS images, particularly MODS2R images, are often missing TCS keywords: DATE-OBS, TELRA, TELDEC, guider and temperature data, etc. 
@@ -80,10 +83,11 @@ def int_or_float(num):
    else:
       return float(num)
 
-def tcsstatus(inImage,isislog,L):
+def tcsstatus(inImage,isislog,chan,L):
    G = open(isislog,"r")
    isis = G.readlines()
    ti = -1
+   c = str.upper(chan)
 
    # find the line reporting that the input image was written
    # the missing TCS information can be found in the preceding TCSTATUS line, which should have a timestamp 
@@ -94,9 +98,14 @@ def tcsstatus(inImage,isislog,L):
         fi = int(fl[0])
         print(fi, isis[fi])
         L.write("%d %s\n" % (fi,isis[fi]))
-        tall = [i for i in range(len(isis)) if "M2.TC>M2.RC DONE: TCSTATUS" in isis[i]]
-        iall = [i for i in range(len(isis)) if "M2.IE>M2.RC DONE: ISTATUS" in isis[i]]
-        eall = [i for i in range(len(isis)) if "IE Timeout with ERROR" in isis[i]]
+        if c ==  "R":
+               tall = [i for i in range(len(isis)) if "M2.TC>M2.RC DONE: TCSTATUS" in isis[i]]
+               iall = [i for i in range(len(isis)) if "M2.IE>M2.RC DONE: ISTATUS" in isis[i]]
+               eall = [i for i in range(len(isis)) if "M2.RC>MC2 WARNING: GO IE Timeout with ERROR" in isis[i]]
+        if c ==  "B":
+               tall = [i for i in range(len(isis)) if "M2.TC>M2.BC DONE: TCSTATUS" in isis[i]]
+               iall = [i for i in range(len(isis)) if "M2.IE>M2.BC DONE: ISTATUS" in isis[i]]
+               eall = [i for i in range(len(isis)) if "M2.BC>MC2 WARNING: GO IE Timeout with ERROR" in isis[i]]
 
         print (tall)
         # if there is no tcstatus line that corresponds to the start of exposure
@@ -214,7 +223,7 @@ for e in range(nimgs):
 
    # if tisis == 0, then search in the ISIS log from the day before or after
    ntries = 0
-   while ((tisis := tcsstatus(inImage,isislog,L)) == 0 and ntries<2):
+   while ((tisis := tcsstatus(inImage,isislog,chan,L)) == 0 and ntries<2):
         print(isislog)
         isislog = isisdir + "isis." + str(fdate[ntries]) + ".log"
         ntries = ntries+1
@@ -244,6 +253,8 @@ for e in range(nimgs):
 
    outfile = readhead(inImage)
 
+   # find the duplicate keywords
+   duplist = find_dups(outfile)
 
    # read the header text file line by line
    # pick out the MISSING and DUPLICATE entries 
@@ -262,7 +273,6 @@ for e in range(nimgs):
    idup = 0
   
 
-   # find the duplicate keywords
    duplist = find_dups(outfile)
 
    isodate = '0'
